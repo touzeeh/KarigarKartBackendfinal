@@ -1,0 +1,88 @@
+{
+  "features": [
+    "class_name",
+    "product_form"
+  ],
+  "target": "listed_price_inr",
+  "transform": "log1p target, expm1 prediction",
+  "training_class_counts": {
+    "ajrakh__cotton": 65,
+    "ajrakh__mixed": 30,
+    "ajrakh__unknown": 30,
+    "bagh_print__cotton": 33,
+    "bandhani__cotton": 21,
+    "channapatna__wood": 21,
+    "dhokra__brass": 17,
+    "fabric__cotton": 33,
+    "handwoven_fabric__cotton": 22,
+    "jaipur_blue_pottery__ceramic": 36,
+    "jute_craft__jute": 8,
+    "kalamkari__cotton": 66,
+    "kalamkari__mixed": 25,
+    "kalamkari__silk": 19,
+    "kalamkari__unknown": 64,
+    "kantha__cotton": 16,
+    "kantha__mixed": 21,
+    "kantha__unknown": 40,
+    "pochampally_ikat__cotton": 57,
+    "pochampally_ikat__unknown": 2,
+    "textile_bag__cotton": 33,
+    "textile_bag__mixed": 31,
+    "textile_bag__silk": 40,
+    "woodcraft__wood": 29
+  },
+  "training_forms": [
+    "bag",
+    "bowl",
+    "box",
+    "coaster",
+    "fabric",
+    "figurine",
+    "pot",
+    "spoon",
+    "toy",
+    "tray",
+    "unspecified",
+    "vase",
+    "wall_hanging"
+  ],
+  "minimum_class_training_products": 5,
+  "currency": "INR",
+  "performance": {
+    "target": "catalogue listed price in INR; not actual sales or fair value",
+    "features": [
+      "class_name",
+      "product_form"
+    ],
+    "split_counts": {
+      "train": 759,
+      "val": 152,
+      "test": 211
+    },
+    "split_groups": {
+      "train": 219,
+      "val": 48,
+      "test": 48
+    },
+    "cross_split_group_overlap": 0,
+    "chosen_depth": 4,
+    "validation_mae_inr": 385.664859570955,
+    "xgboost_test": {
+      "mae_inr": 515.2775825392014,
+      "rmse_inr": 717.0313628039571,
+      "median_absolute_error_inr": 351.4830322265625
+    },
+    "class_median_baseline_test": {
+      "mae_inr": 578.0568720379147,
+      "rmse_inr": 777.6977202460024,
+      "median_absolute_error_inr": 400.0
+    },
+    "test_unseen_class_products": 0,
+    "test_note": "Evaluated with catalogue labels, not end-to-end YOLO predictions. Retail source bias and missing sizes remain.",
+    "python": "3.13.14",
+    "xgboost": "3.4.1",
+    "sklearn": "1.9.1",
+    "data_sha256": "515bafa602a6d2378ad936a2fa753ac6ea13a56f001550494d4f8d1a6d9d08f3",
+    "beats_median_baseline": true
+  }
+}
