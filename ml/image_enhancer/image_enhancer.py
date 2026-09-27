@@ -202,13 +202,13 @@ class ImageEnhancer:
         with torch.inference_mode():
             output = self.model(tensor)
 
-        output = output.squeeze(0).clamp_(0, 1)
+        output = output.squeeze(0).clamp(0, 1)
 
         output = (
             output
             .permute(1, 2, 0)
-            .mul_(255.0)
-            .round_()
+            .mul(255.0)
+            .round()
             .byte()
             .cpu()
             .numpy()
