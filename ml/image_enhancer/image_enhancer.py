@@ -1,4 +1,5 @@
 from pathlib import Path
+import gc
 
 import cv2
 import numpy as np
@@ -8,7 +9,7 @@ from spandrel import ModelLoader
 
 # Keep CPU inference reasonably fast without trying to use every logical
 # thread on the machine.
-_CPU_THREADS = min(8, max(1, torch.get_num_threads()))
+_CPU_THREADS = 1
 torch.set_num_threads(_CPU_THREADS)
 try:
     torch.set_num_interop_threads(1)
@@ -37,7 +38,9 @@ class ImageEnhancer:
 
     # Processing a smaller image makes CPU Real-ESRGAN much faster.
     # The final image is still enlarged 4x by Real-ESRGAN.
-    MAX_INPUT_SIDE = 320
+    MAX_INPUT_SIDE = 256
+    TILE_SIZE = 64
+    TILE_PAD = 8
 
     def __init__(self):
         print("🖼️ Initializing KarigarKart Image Enhancer...")
@@ -178,12 +181,56 @@ class ImageEnhancer:
             255
         ).astype(np.uint8)
 
+    def _run_esrgan_tile(self, tile: np.ndarray) -> np.ndarray:
+        """Run one small RGB tile through Real-ESRGAN."""
+        rgb = np.ascontiguousarray(tile)
+
+        tensor = (
+            torch.from_numpy(rgb)
+            .float()
+            .div_(255.0)
+            .permute(2, 0, 1)
+            .unsqueeze(0)
+            .contiguous()
+        )
+
+        print(
+            f"🧩 ESRGAN tile inference: "
+            f"{rgb.shape[1]}x{rgb.shape[0]}"
+        )
+
+        with torch.inference_mode():
+            output = self.model(tensor)
+
+        output = output.squeeze(0).clamp_(0, 1)
+
+        output = (
+            output
+            .permute(1, 2, 0)
+            .mul_(255.0)
+            .round_()
+            .byte()
+            .cpu()
+            .numpy()
+        )
+
+        result = np.ascontiguousarray(output)
+
+        del output
+        del tensor
+        gc.collect()
+
+        return result
+
     def neural_enhancement(
         self,
         image: np.ndarray
     ) -> np.ndarray:
         """
-        Run Real-ESRGAN on CPU.
+        Run Real-ESRGAN using low-memory tiled inference.
+
+        The previous full-frame forward pass could exceed Railway's
+        1 GB replica memory limit. Tiles keep peak activation memory low.
         """
 
         rgb = cv2.cvtColor(
@@ -191,42 +238,96 @@ class ImageEnhancer:
             cv2.COLOR_BGR2RGB
         )
 
-        tensor = (
-            torch.from_numpy(rgb)
-            .float()
-            .div(255.0)
-            .permute(2, 0, 1)
-            .unsqueeze(0)
-            .contiguous()
+        height, width = rgb.shape[:2]
+        scale = int(getattr(self.model, "scale", 4) or 4)
+
+        output = np.empty(
+            (
+                height * scale,
+                width * scale,
+                3
+            ),
+            dtype=np.uint8
         )
 
-        tensor = tensor.to(self.device)
+        tile_size = self.TILE_SIZE
+        tile_pad = self.TILE_PAD
 
-        print("🤖 Running Real-ESRGAN inference...")
+        tiles_x = (width + tile_size - 1) // tile_size
+        tiles_y = (height + tile_size - 1) // tile_size
+        total_tiles = tiles_x * tiles_y
+        tile_number = 0
 
-        with torch.inference_mode():
-            output = self.model(tensor)
-
-        output = output.squeeze(0)
-        output = output.clamp(0, 1)
-
-        output = (
-            output
-            .permute(1, 2, 0)
-            .cpu()
-            .numpy()
+        print(
+            "🤖 Running tiled Real-ESRGAN inference "
+            f"(tile={tile_size}, pad={tile_pad}, "
+            f"tiles={total_tiles})..."
         )
 
-        output = (
-            output * 255.0
-        ).round().astype(np.uint8)
+        for y0 in range(0, height, tile_size):
+            for x0 in range(0, width, tile_size):
+                tile_number += 1
 
-        output = cv2.cvtColor(
+                x1 = min(x0 + tile_size, width)
+                y1 = min(y0 + tile_size, height)
+
+                # Overlap the input tiles to reduce boundary artifacts.
+                px0 = max(0, x0 - tile_pad)
+                py0 = max(0, y0 - tile_pad)
+                px1 = min(width, x1 + tile_pad)
+                py1 = min(height, y1 + tile_pad)
+
+                tile = rgb[py0:py1, px0:px1]
+
+                print(
+                    f"🧩 Tile {tile_number}/{total_tiles}: "
+                    f"{tile.shape[1]}x{tile.shape[0]}"
+                )
+
+                tile_output = self._run_esrgan_tile(tile)
+
+                # Remove the padded border from the neural output.
+                crop_left = (x0 - px0) * scale
+                crop_top = (y0 - py0) * scale
+                crop_right = crop_left + (x1 - x0) * scale
+                crop_bottom = crop_top + (y1 - y0) * scale
+
+                clean = tile_output[
+                    crop_top:crop_bottom,
+                    crop_left:crop_right
+                ]
+
+                ox0 = x0 * scale
+                oy0 = y0 * scale
+                ox1 = x1 * scale
+                oy1 = y1 * scale
+
+                expected_h = oy1 - oy0
+                expected_w = ox1 - ox0
+
+                if clean.shape[:2] != (expected_h, expected_w):
+                    raise RuntimeError(
+                        "Unexpected Real-ESRGAN tile output shape: "
+                        f"{clean.shape[:2]} != "
+                        f"{(expected_h, expected_w)}"
+                    )
+
+                output[oy0:oy1, ox0:ox1] = clean
+
+                del clean
+                del tile_output
+                del tile
+                gc.collect()
+
+        del rgb
+        gc.collect()
+
+        # Convert RGB output back to the BGR convention used by the
+        # existing OpenCV encoder.
+        return cv2.cvtColor(
             output,
             cv2.COLOR_RGB2BGR
         )
-
-        return output
 
     def enhance(
         self,
